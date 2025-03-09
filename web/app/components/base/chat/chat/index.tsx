@@ -11,25 +11,32 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { debounce } from 'lodash-es'
-import classNames from 'classnames'
+import { useShallow } from 'zustand/react/shallow'
 import type {
   ChatConfig,
   ChatItem,
   Feedback,
+  OnRegenerate,
   OnSend,
 } from '../types'
+import type { ThemeBuilder } from '../embedded-chatbot/theme/theme-context'
 import Question from './question'
 import Answer from './answer'
-import ChatInput from './chat-input'
+import ChatInputArea from './chat-input-area'
 import TryToAsk from './try-to-ask'
 import { ChatContextProvider } from './context'
+import type { InputForm } from './type'
+import cn from '@/utils/classnames'
 import type { Emoji } from '@/app/components/tools/types'
 import Button from '@/app/components/base/button'
 import { StopCircle } from '@/app/components/base/icons/src/vender/solid/mediaAndDevices'
+import AgentLogModal from '@/app/components/base/agent-log-modal'
 import PromptLogModal from '@/app/components/base/prompt-log-modal'
 import { useStore as useAppStore } from '@/app/components/app/store'
+import type { AppData } from '@/models/share'
 
 export type ChatProps = {
+  appData?: AppData
   chatList: ChatItem[]
   config?: ChatConfig
   isResponding?: boolean
@@ -37,6 +44,9 @@ export type ChatProps = {
   onStopResponding?: () => void
   noChatInput?: boolean
   onSend?: OnSend
+  inputs?: Record<string, any>
+  inputsForm?: InputForm[]
+  onRegenerate?: OnRegenerate
   chatContainerClassName?: string
   chatContainerInnerClassName?: string
   chatFooterClassName?: string
@@ -52,10 +62,25 @@ export type ChatProps = {
   chatNode?: ReactNode
   onFeedback?: (messageId: string, feedback: Feedback) => void
   chatAnswerContainerInner?: string
+  hideProcessDetail?: boolean
+  hideLogModal?: boolean
+  themeBuilder?: ThemeBuilder
+  switchSibling?: (siblingMessageId: string) => void
+  showFeatureBar?: boolean
+  showFileUpload?: boolean
+  onFeatureBarClick?: (state: boolean) => void
+  noSpacing?: boolean
+  inputDisabled?: boolean
+  isMobile?: boolean
 }
+
 const Chat: FC<ChatProps> = ({
+  appData,
   config,
   onSend,
+  inputs,
+  inputsForm,
+  onRegenerate,
   chatList,
   isResponding,
   noStopResponding,
@@ -69,16 +94,32 @@ const Chat: FC<ChatProps> = ({
   showPromptLog,
   questionIcon,
   answerIcon,
-  allToolIcons,
   onAnnotationAdded,
   onAnnotationEdited,
   onAnnotationRemoved,
   chatNode,
   onFeedback,
   chatAnswerContainerInner,
+  hideProcessDetail,
+  hideLogModal,
+  themeBuilder,
+  switchSibling,
+  showFeatureBar,
+  showFileUpload,
+  onFeatureBarClick,
+  noSpacing,
+  inputDisabled,
+  isMobile,
 }) => {
   const { t } = useTranslation()
-  const { currentLogItem, setCurrentLogItem, showPromptLogModal, setShowPromptLogModal } = useAppStore()
+  const { currentLogItem, setCurrentLogItem, showPromptLogModal, setShowPromptLogModal, showAgentLogModal, setShowAgentLogModal } = useAppStore(useShallow(state => ({
+    currentLogItem: state.currentLogItem,
+    setCurrentLogItem: state.setCurrentLogItem,
+    showPromptLogModal: state.showPromptLogModal,
+    setShowPromptLogModal: state.setShowPromptLogModal,
+    showAgentLogModal: state.showAgentLogModal,
+    setShowAgentLogModal: state.setShowAgentLogModal,
+  })))
   const [width, setWidth] = useState(0)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatContainerInnerRef = useRef<HTMLDivElement>(null)
@@ -86,10 +127,10 @@ const Chat: FC<ChatProps> = ({
   const chatFooterInnerRef = useRef<HTMLDivElement>(null)
   const userScrolledRef = useRef(false)
 
-  const handleScrolltoBottom = useCallback(() => {
-    if (chatContainerRef.current && !userScrolledRef.current)
+  const handleScrollToBottom = useCallback(() => {
+    if (chatList.length > 1 && chatContainerRef.current && !userScrolledRef.current)
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
-  }, [])
+  }, [chatList.length])
 
   const handleWindowResize = useCallback(() => {
     if (chatContainerRef.current)
@@ -103,14 +144,14 @@ const Chat: FC<ChatProps> = ({
   }, [])
 
   useEffect(() => {
-    handleScrolltoBottom()
+    handleScrollToBottom()
     handleWindowResize()
-  }, [handleScrolltoBottom, handleWindowResize])
+  }, [handleScrollToBottom, handleWindowResize])
 
   useEffect(() => {
     if (chatContainerRef.current) {
       requestAnimationFrame(() => {
-        handleScrolltoBottom()
+        handleScrollToBottom()
         handleWindowResize()
       })
     }
@@ -128,7 +169,7 @@ const Chat: FC<ChatProps> = ({
           const { blockSize } = entry.borderBoxSize[0]
 
           chatContainerRef.current!.style.paddingBottom = `${blockSize}px`
-          handleScrolltoBottom()
+          handleScrollToBottom()
         }
       })
 
@@ -138,14 +179,14 @@ const Chat: FC<ChatProps> = ({
         resizeObserver.disconnect()
       }
     }
-  }, [handleScrolltoBottom])
+  }, [handleScrollToBottom])
 
   useEffect(() => {
     const chatContainer = chatContainerRef.current
     if (chatContainer) {
       const setUserScrolled = () => {
         if (chatContainer)
-          userScrolledRef.current = chatContainer.scrollHeight - chatContainer.scrollTop >= chatContainer.clientHeight + 300
+          userScrolledRef.current = chatContainer.scrollHeight - chatContainer.scrollTop > chatContainer.clientHeight
       }
       chatContainer.addEventListener('scroll', setUserScrolled)
       return () => chatContainer.removeEventListener('scroll', setUserScrolled)
@@ -162,8 +203,8 @@ const Chat: FC<ChatProps> = ({
       showPromptLog={showPromptLog}
       questionIcon={questionIcon}
       answerIcon={answerIcon}
-      allToolIcons={allToolIcons}
       onSend={onSend}
+      onRegenerate={onRegenerate}
       onAnnotationAdded={onAnnotationAdded}
       onAnnotationEdited={onAnnotationEdited}
       onAnnotationRemoved={onAnnotationRemoved}
@@ -172,12 +213,12 @@ const Chat: FC<ChatProps> = ({
       <div className='relative h-full'>
         <div
           ref={chatContainerRef}
-          className={classNames('relative h-full overflow-y-auto', chatContainerClassName)}
+          className={cn('relative h-full overflow-y-auto overflow-x-hidden', chatContainerClassName)}
         >
           {chatNode}
           <div
             ref={chatContainerInnerRef}
-            className={`${chatContainerInnerClassName}`}
+            className={cn('w-full', !noSpacing && 'px-8', chatContainerInnerClassName)}
           >
             {
               chatList.map((item, index) => {
@@ -185,6 +226,7 @@ const Chat: FC<ChatProps> = ({
                   const isLast = item.id === chatList[chatList.length - 1]?.id
                   return (
                     <Answer
+                      appData={appData}
                       key={item.id}
                       item={item}
                       question={chatList[index - 1]?.content}
@@ -192,9 +234,11 @@ const Chat: FC<ChatProps> = ({
                       config={config}
                       answerIcon={answerIcon}
                       responding={isLast && isResponding}
-                      allToolIcons={allToolIcons}
                       showPromptLog={showPromptLog}
                       chatAnswerContainerInner={chatAnswerContainerInner}
+                      hideProcessDetail={hideProcessDetail}
+                      noChatInput={noChatInput}
+                      switchSibling={switchSibling}
                     />
                   )
                 }
@@ -203,6 +247,7 @@ const Chat: FC<ChatProps> = ({
                     key={item.id}
                     item={item}
                     questionIcon={questionIcon}
+                    theme={themeBuilder?.theme}
                   />
                 )
               })
@@ -210,20 +255,17 @@ const Chat: FC<ChatProps> = ({
           </div>
         </div>
         <div
-          className={`absolute bottom-0 ${(hasTryToAsk || !noChatInput || !noStopResponding) && chatFooterClassName}`}
+          className={`absolute bottom-0 bg-chat-input-mask ${(hasTryToAsk || !noChatInput || !noStopResponding) && chatFooterClassName}`}
           ref={chatFooterRef}
-          style={{
-            background: 'linear-gradient(0deg, #F9FAFB 40%, rgba(255, 255, 255, 0.00) 100%)',
-          }}
         >
           <div
             ref={chatFooterInnerRef}
-            className={`${chatFooterInnerClassName}`}
+            className={cn('relative', chatFooterInnerClassName)}
           >
             {
               !noStopResponding && isResponding && (
                 <div className='flex justify-center mb-2'>
-                  <Button className='py-0 px-3 h-7 bg-white shadow-xs' onClick={onStopResponding}>
+                  <Button onClick={onStopResponding}>
                     <StopCircle className='mr-[5px] w-3.5 h-3.5 text-gray-500' />
                     <span className='text-xs text-gray-500 font-normal'>{t('appDebug.operation.stopResponding')}</span>
                   </Button>
@@ -235,27 +277,47 @@ const Chat: FC<ChatProps> = ({
                 <TryToAsk
                   suggestedQuestions={suggestedQuestions}
                   onSend={onSend}
+                  isMobile={isMobile}
                 />
               )
             }
             {
               !noChatInput && (
-                <ChatInput
-                  visionConfig={config?.file_upload?.image}
+                <ChatInputArea
+                  disabled={inputDisabled}
+                  showFeatureBar={showFeatureBar}
+                  showFileUpload={showFileUpload}
+                  featureBarDisabled={isResponding}
+                  onFeatureBarClick={onFeatureBarClick}
+                  visionConfig={config?.file_upload}
                   speechToTextConfig={config?.speech_to_text}
                   onSend={onSend}
+                  inputs={inputs}
+                  inputsForm={inputsForm}
+                  theme={themeBuilder?.theme}
+                  isResponding={isResponding}
                 />
               )
             }
           </div>
         </div>
-        {showPromptLogModal && (
+        {showPromptLogModal && !hideLogModal && (
           <PromptLogModal
             width={width}
             currentLogItem={currentLogItem}
             onCancel={() => {
               setCurrentLogItem()
               setShowPromptLogModal(false)
+            }}
+          />
+        )}
+        {showAgentLogModal && !hideLogModal && (
+          <AgentLogModal
+            width={width}
+            currentLogItem={currentLogItem}
+            onCancel={() => {
+              setCurrentLogItem()
+              setShowAgentLogModal(false)
             }}
           />
         )}

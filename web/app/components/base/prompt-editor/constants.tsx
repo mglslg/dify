@@ -1,4 +1,4 @@
-import type { ValueSelector } from '../../workflow/types'
+import { SupportUploadFileTypes, type ValueSelector } from '../../workflow/types'
 
 export const CONTEXT_PLACEHOLDER_TEXT = '{{#context#}}'
 export const HISTORY_PLACEHOLDER_TEXT = '{{#histories#}}'
@@ -30,6 +30,9 @@ export const checkHasQueryBlock = (text: string) => {
 * {{#1711617514996.sys.query#}} => [sys, query]
 */
 export const getInputVars = (text: string): ValueSelector[] => {
+  if (!text)
+    return []
+
   const allVars = text.match(/{{#([^#]*)#}}/g)
   if (allVars && allVars?.length > 0) {
     // {{#context#}}, {{#query#}} is not input vars
@@ -45,4 +48,11 @@ export const getInputVars = (text: string): ValueSelector[] => {
     return inputVars
   }
   return []
+}
+
+export const FILE_EXTS: Record<string, string[]> = {
+  [SupportUploadFileTypes.image]: ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG'],
+  [SupportUploadFileTypes.document]: ['TXT', 'MD', 'MDX', 'MARKDOWN', 'PDF', 'HTML', 'XLSX', 'XLS', 'DOC', 'DOCX', 'CSV', 'EML', 'MSG', 'PPTX', 'PPT', 'XML', 'EPUB'],
+  [SupportUploadFileTypes.audio]: ['MP3', 'M4A', 'WAV', 'WEBM', 'AMR', 'MPGA'],
+  [SupportUploadFileTypes.video]: ['MP4', 'MOV', 'MPEG', 'MPGA'],
 }

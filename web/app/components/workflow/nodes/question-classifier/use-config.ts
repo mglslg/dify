@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import produce from 'immer'
 import { BlockEnum, VarType } from '../../types'
 import type { Memory, ValueSelector, Var } from '../../types'
@@ -7,11 +7,14 @@ import {
   useWorkflow,
 } from '../../hooks'
 import { useStore } from '../../store'
+import useAvailableVarList from '../_base/hooks/use-available-var-list'
+import useConfigVision from '../../hooks/use-config-vision'
 import type { QuestionClassifierNodeType } from './types'
 import useNodeCrud from '@/app/components/workflow/nodes/_base/hooks/use-node-crud'
 import useOneStepRun from '@/app/components/workflow/nodes/_base/hooks/use-one-step-run'
 import { useModelListAndDefaultModelAndCurrentProviderAndModel } from '@/app/components/header/account-setting/model-provider-page/hooks'
 import { ModelTypeEnum } from '@/app/components/header/account-setting/model-provider-page/declarations'
+import { checkHasQueryBlock } from '@/app/components/base/prompt-editor/constants'
 
 const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
   const { nodesReadOnly: readOnly } = useNodesReadOnly()
@@ -26,7 +29,7 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
     inputRef.current = inputs
   }, [inputs])
 
-  // model
+  const [modelChanged, setModelChanged] = useState(false)
   const {
     currentProvider,
     currentModel,
@@ -36,6 +39,21 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
   const modelMode = inputs.model?.mode
   const isChatModel = modelMode === 'chat'
 
+  const {
+    isVisionModel,
+    handleVisionResolutionEnabledChange,
+    handleVisionResolutionChange,
+    handleModelChanged: handleVisionConfigAfterModelChanged,
+  } = useConfigVision(model, {
+    payload: inputs.vision,
+    onChange: (newPayload) => {
+      const newInputs = produce(inputs, (draft) => {
+        draft.vision = newPayload
+      })
+      setInputs(newInputs)
+    },
+  })
+
   const handleModelChanged = useCallback((model: { provider: string; modelId: string; mode?: string }) => {
     const newInputs = produce(inputRef.current, (draft) => {
       draft.model.provider = model.provider
@@ -43,6 +61,7 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
       draft.model.mode = model.mode!
     })
     setInputs(newInputs)
+    setModelChanged(true)
   }, [setInputs])
 
   useEffect(() => {
@@ -62,12 +81,20 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
     setInputs(newInputs)
   }, [inputs, setInputs])
 
+  // change to vision model to set vision enabled, else disabled
+  useEffect(() => {
+    if (!modelChanged)
+      return
+    setModelChanged(false)
+    handleVisionConfigAfterModelChanged()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisionModel, modelChanged])
+
   const handleQueryVarChange = useCallback((newVar: ValueSelector | string) => {
     const newInputs = produce(inputs, (draft) => {
       draft.query_variable_selector = newVar as ValueSelector
     })
     setInputs(newInputs)
-    // console.log(newInputs.query_variable_selector)
   }, [inputs, setInputs])
 
   useEffect(() => {
@@ -93,6 +120,35 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
     setInputs(newInputs)
   }, [inputs, setInputs])
 
+  const filterInputVar = useCallback((varPayload: Var) => {
+    return [VarType.number, VarType.string].includes(varPayload.type)
+  }, [])
+
+  const filterVisionInputVar = useCallback((varPayload: Var) => {
+    return [VarType.file, VarType.arrayFile].includes(varPayload.type)
+  }, [])
+
+  const {
+    availableVars,
+    availableNodesWithParent,
+  } = useAvailableVarList(id, {
+    onlyLeafNodeVar: false,
+    filterVar: filterInputVar,
+  })
+
+  const {
+    availableVars: availableVisionVars,
+  } = useAvailableVarList(id, {
+    onlyLeafNodeVar: false,
+    filterVar: filterVisionInputVar,
+  })
+
+  const hasSetBlockStatus = {
+    history: false,
+    query: isChatMode ? checkHasQueryBlock(inputs.instruction) : false,
+    context: false,
+  }
+
   const handleInstructionChange = useCallback((instruction: string) => {
     const newInputs = produce(inputs, (draft) => {
       draft.instruction = instruction
@@ -111,17 +167,20 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
   const {
     isShowSingleRun,
     hideSingleRun,
+    getInputVars,
     runningStatus,
     handleRun,
     handleStop,
     runInputData,
+    runInputDataRef,
     setRunInputData,
     runResult,
   } = useOneStepRun<QuestionClassifierNodeType>({
     id,
     data: inputs,
     defaultRunInputData: {
-      query: '',
+      'query': '',
+      '#files#': [],
     },
   })
 
@@ -132,6 +191,30 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
       query: newQuery,
     })
   }, [runInputData, setRunInputData])
+
+  const varInputs = getInputVars([inputs.instruction])
+  const inputVarValues = (() => {
+    const vars: Record<string, any> = {
+      query,
+    }
+    Object.keys(runInputData)
+      .forEach((key) => {
+        vars[key] = runInputData[key]
+      })
+    return vars
+  })()
+
+  const setInputVarValues = useCallback((newPayload: Record<string, any>) => {
+    setRunInputData(newPayload)
+  }, [setRunInputData])
+
+  const visionFiles = runInputData['#files#']
+  const setVisionFiles = useCallback((newFiles: any[]) => {
+    setRunInputData({
+      ...runInputDataRef.current,
+      '#files#': newFiles,
+    })
+  }, [runInputDataRef, setRunInputData])
 
   const filterVar = useCallback((varPayload: Var) => {
     return varPayload.type === VarType.string
@@ -147,8 +230,18 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
     handleQueryVarChange,
     filterVar,
     handleTopicsChange: handleClassesChange,
+    hasSetBlockStatus,
+    availableVars,
+    availableNodesWithParent,
+    availableVisionVars,
     handleInstructionChange,
+    varInputs,
+    inputVarValues,
+    setInputVarValues,
     handleMemoryChange,
+    isVisionModel,
+    handleVisionResolutionEnabledChange,
+    handleVisionResolutionChange,
     isShowSingleRun,
     hideSingleRun,
     runningStatus,
@@ -157,6 +250,8 @@ const useConfig = (id: string, payload: QuestionClassifierNodeType) => {
     query,
     setQuery,
     runResult,
+    visionFiles,
+    setVisionFiles,
   }
 }
 

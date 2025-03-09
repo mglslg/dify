@@ -1,27 +1,26 @@
 import type { FC } from 'react'
-import React, { useMemo } from 'react'
-import { useStoreApi } from 'reactflow'
+import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { BlockEnum } from '../../types'
 import MemoryConfig from '../_base/components/memory-config'
 import VarReferencePicker from '../_base/components/variable/var-reference-picker'
+import ConfigVision from '../_base/components/config-vision'
 import useConfig from './use-config'
-import ResolutionPicker from './components/resolution-picker'
+import { findVariableWhenOnLLMVision } from '../utils'
 import type { LLMNodeType } from './types'
 import ConfigPrompt from './components/config-prompt'
+import VarList from '@/app/components/workflow/nodes/_base/components/variable/var-list'
+import AddButton2 from '@/app/components/base/button/add-button'
 import Field from '@/app/components/workflow/nodes/_base/components/field'
 import Split from '@/app/components/workflow/nodes/_base/components/split'
 import ModelParameterModal from '@/app/components/header/account-setting/model-provider-page/model-parameter-modal'
 import OutputVars, { VarItem } from '@/app/components/workflow/nodes/_base/components/output-vars'
-import { Resolution } from '@/types/app'
 import { InputVarType, type NodePanelProps } from '@/app/components/workflow/types'
 import BeforeRunForm from '@/app/components/workflow/nodes/_base/components/before-run-form'
 import type { Props as FormProps } from '@/app/components/workflow/nodes/_base/components/before-run-form/form'
 import ResultPanel from '@/app/components/workflow/run/result-panel'
-import TooltipPlus from '@/app/components/base/tooltip-plus'
-import { HelpCircle } from '@/app/components/base/icons/src/vender/line/general'
+import Tooltip from '@/app/components/base/tooltip'
 import Editor from '@/app/components/workflow/nodes/_base/components/prompt/editor'
-import Switch from '@/app/components/base/switch'
+
 const i18nPrefix = 'workflow.nodes.llm'
 
 const Panel: FC<NodePanelProps<LLMNodeType>> = ({
@@ -29,12 +28,6 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
   data,
 }) => {
   const { t } = useTranslation()
-  const store = useStoreApi()
-
-  const startNode = useMemo(() => {
-    const nodes = store.getState().getNodes()
-    return nodes.find(node => node.data.type === BlockEnum.Start)
-  }, [store])
 
   const {
     readOnly,
@@ -43,14 +36,22 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
     isChatMode,
     isCompletionModel,
     shouldShowContextTip,
-    isShowVisionConfig,
+    isVisionModel,
     handleModelChanged,
     hasSetBlockStatus,
     handleCompletionParamsChange,
     handleContextVarChange,
     filterInputVar,
     filterVar,
+    availableVars,
+    availableNodesWithParent,
+    isShowVars,
     handlePromptChange,
+    handleAddEmptyVariable,
+    handleAddVariable,
+    handleVarListChange,
+    handleVarNameChange,
+    handleSyeQueryChange,
     handleMemoryChange,
     handleVisionResolutionEnabledChange,
     handleVisionResolutionChange,
@@ -67,6 +68,7 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
     handleStop,
     varInputs,
     runResult,
+    filterJinjia2InputVar,
   } = useConfig(id, data)
 
   const model = inputs.model
@@ -101,14 +103,16 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
       )
     }
 
-    if (isShowVisionConfig) {
+    if (isVisionModel && data.vision.enabled && data.vision.configs?.variable_selector) {
+      const currentVariable = findVariableWhenOnLLMVision(data.vision.configs.variable_selector, availableVars)
+
       forms.push(
         {
           label: t(`${i18nPrefix}.vision`)!,
           inputs: [{
-            label: t(`${i18nPrefix}.files`)!,
+            label: currentVariable?.variable as any,
             variable: '#files#',
-            type: InputVarType.files,
+            type: currentVariable?.formType as any,
             required: false,
           }],
           values: { '#files#': visionFiles },
@@ -174,7 +178,29 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
             payload={inputs.prompt_template}
             onChange={handlePromptChange}
             hasSetBlockStatus={hasSetBlockStatus}
+            varList={inputs.prompt_config?.jinja2_variables || []}
+            handleAddVariable={handleAddVariable}
+            modelConfig={model}
           />
+        )}
+
+        {isShowVars && (
+          <Field
+            title={t('workflow.nodes.templateTransform.inputVars')}
+            operations={
+              !readOnly ? <AddButton2 onClick={handleAddEmptyVariable} /> : undefined
+            }
+          >
+            <VarList
+              nodeId={id}
+              readonly={readOnly}
+              list={inputs.prompt_config?.jinja2_variables || []}
+              onChange={handleVarListChange}
+              onVarNameChange={handleVarNameChange}
+              filterVar={filterJinjia2InputVar}
+              isSupportFileVar={false}
+            />
+          </Field>
         )}
 
         {/* Memory put place examples. */}
@@ -183,11 +209,10 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
             <div className='flex justify-between items-center h-8 pl-3 pr-2 rounded-lg bg-gray-100'>
               <div className='flex items-center space-x-1'>
                 <div className='text-xs font-semibold text-gray-700 uppercase'>{t('workflow.nodes.common.memories.title')}</div>
-                <TooltipPlus
+                <Tooltip
                   popupContent={t('workflow.nodes.common.memories.tip')}
-                >
-                  <HelpCircle className='w-3.5 h-3.5 text-gray-400' />
-                </TooltipPlus>
+                  triggerClassName='w-4 h-4'
+                />
               </div>
               <div className='flex items-center h-[18px] px-1 rounded-[5px] border border-black/8 text-xs font-semibold text-gray-500 uppercase'>{t('workflow.nodes.common.memories.builtIn')}</div>
             </div>
@@ -196,27 +221,28 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
               <Editor
                 title={<div className='flex items-center space-x-1'>
                   <div className='text-xs font-semibold text-gray-700 uppercase'>user</div>
-                  <TooltipPlus
+                  <Tooltip
                     popupContent={
                       <div className='max-w-[180px]'>{t('workflow.nodes.llm.roleDescription.user')}</div>
                     }
-                  >
-                    <HelpCircle className='w-3.5 h-3.5 text-gray-400' />
-                  </TooltipPlus>
+                    triggerClassName='w-4 h-4'
+                  />
                 </div>}
-                value={'{{#sys.query#}}'}
-                onChange={() => { }}
-                readOnly
+                value={inputs.memory.query_prompt_template || '{{#sys.query#}}'}
+                onChange={handleSyeQueryChange}
+                readOnly={readOnly}
                 isShowContext={false}
                 isChatApp
-                isChatModel={false}
-                hasSetBlockStatus={{
-                  query: false,
-                  history: true,
-                  context: true,
-                }}
-                availableNodes={[startNode!]}
+                isChatModel
+                hasSetBlockStatus={hasSetBlockStatus}
+                nodesOutputVars={availableVars}
+                availableNodes={availableNodesWithParent}
+                isSupportFileVar
               />
+
+              {inputs.memory.query_prompt_template && !inputs.memory.query_prompt_template.includes('{{#sys.query#}}') && (
+                <div className='leading-[18px] text-xs font-normal text-[#DC6803]'>{t(`${i18nPrefix}.sysQueryInUser`)}</div>
+              )}
             </div>
           </div>
         )}
@@ -235,44 +261,30 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
         )}
 
         {/* Vision: GPT4-vision and so on */}
-        {isShowVisionConfig && (
-          <>
-            <Split />
-            <Field
-              title={t(`${i18nPrefix}.vision`)}
-              tooltip={t('appDebug.vision.description')!}
-              operations={
-                <Switch size='md' defaultValue={inputs.vision.enabled} onChange={handleVisionResolutionEnabledChange} />
-              }
-            >
-              {inputs.vision.enabled
-                ? (
-                  <ResolutionPicker
-                    value={inputs.vision.configs?.detail || Resolution.high}
-                    onChange={handleVisionResolutionChange}
-                  />
-                )
-                : null}
-
-            </Field>
-          </>
-        )}
+        <ConfigVision
+          nodeId={id}
+          readOnly={readOnly}
+          isVisionModel={isVisionModel}
+          enabled={inputs.vision?.enabled}
+          onEnabledChange={handleVisionResolutionEnabledChange}
+          config={inputs.vision?.configs}
+          onConfigChange={handleVisionResolutionChange}
+        />
       </div>
       <Split />
-      <div className='px-4 pt-4 pb-2'>
-        <OutputVars>
-          <>
-            <VarItem
-              name='text'
-              type='string'
-              description={t(`${i18nPrefix}.outputVars.output`)}
-            />
-          </>
-        </OutputVars>
-      </div>
+      <OutputVars>
+        <>
+          <VarItem
+            name='text'
+            type='string'
+            description={t(`${i18nPrefix}.outputVars.output`)}
+          />
+        </>
+      </OutputVars>
       {isShowSingleRun && (
         <BeforeRunForm
           nodeName={inputs.title}
+          nodeType={inputs.type}
           onHide={hideSingleRun}
           forms={singleRunForms}
           runningStatus={runningStatus}

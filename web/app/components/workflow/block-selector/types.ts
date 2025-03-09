@@ -1,7 +1,13 @@
 export enum TabsEnum {
   Blocks = 'blocks',
-  BuiltInTool = 'built-in-tool',
-  CustomTool = 'custom-tool',
+  Tools = 'tools',
+}
+
+export enum ToolTypeEnum {
+  All = 'all',
+  BuiltIn = 'built-in',
+  Custom = 'custom',
+  Workflow = 'workflow',
 }
 
 export enum BlockClassificationEnum {
@@ -19,4 +25,18 @@ export type ToolDefaultValue = {
   tool_name: string
   tool_label: string
   title: string
+  is_team_authorization: boolean
+  params: Record<string, any>
+  paramSchemas: Record<string, any>[]
+  output_schema: Record<string, any>
+}
+
+export type ToolValue = {
+  provider_name: string
+  tool_name: string
+  tool_label: string
+  settings?: Record<string, any>
+  parameters?: Record<string, any>
+  enabled?: boolean
+  extra?: Record<string, any>
 }

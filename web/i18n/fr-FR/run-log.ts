@@ -18,6 +18,14 @@ const translation = {
     tokens: 'Total des jetons',
     steps: 'Étapes d\'exécution',
   },
+  resultEmpty: {
+    title: 'Cela exécute uniquement le format de sortie JSON,',
+    tipLeft: 'veuillez aller à ',
+    link: 'panneau de détail',
+    tipRight: ' visualisez-le.',
+  },
+  actionLogs: 'Journaux d’actions',
+  circularInvocationTip: 'Il y a un appel circulaire d’outils/nœuds dans le flux de travail actuel.',
 }
 
 export default translation

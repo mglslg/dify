@@ -1,111 +1,125 @@
 import {
   memo,
-  useCallback,
   useMemo,
+  useRef,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import BlockIcon from '../block-icon'
-import { BlockEnum } from '../types'
-import type { ToolWithProvider } from '../types'
-import { useStore } from '../store'
-import type { ToolDefaultValue } from './types'
-import Tooltip from '@/app/components/base/tooltip'
+import type { BlockEnum, ToolWithProvider } from '../types'
+import IndexBar, { groupItems } from './index-bar'
+import type { ToolDefaultValue, ToolValue } from './types'
+import { ViewType } from './view-type-select'
+import Empty from '@/app/components/tools/add-tool-modal/empty'
 import { useGetLanguage } from '@/context/i18n'
+import ToolListTreeView from './tool/tool-list-tree-view/list'
+import ToolListFlatView from './tool/tool-list-flat-view/list'
+import classNames from '@/utils/classnames'
 
 type ToolsProps = {
-  isCustom?: boolean
+  showWorkflowEmpty: boolean
   onSelect: (type: BlockEnum, tool?: ToolDefaultValue) => void
-  searchText: string
+  tools: ToolWithProvider[]
+  viewType: ViewType
+  hasSearchText: boolean
+  className?: string
+  indexBarClassName?: string
+  selectedTools?: ToolValue[]
 }
 const Blocks = ({
-  isCustom,
-  searchText,
+  showWorkflowEmpty,
   onSelect,
+  tools,
+  viewType,
+  hasSearchText,
+  className,
+  indexBarClassName,
+  selectedTools,
 }: ToolsProps) => {
   const { t } = useTranslation()
   const language = useGetLanguage()
-  const buildInTools = useStore(s => s.buildInTools)
-  const customTools = useStore(s => s.customTools)
+  const isFlatView = viewType === ViewType.flat
+  const isShowLetterIndex = isFlatView && tools.length > 10
 
-  const tools = useMemo(() => {
-    const currentTools = isCustom ? customTools : buildInTools
-
-    return currentTools.filter((toolWithProvider) => {
-      return toolWithProvider.tools.some((tool) => {
-        return tool.label[language].toLowerCase().includes(searchText.toLowerCase())
+  /*
+  treeViewToolsData:
+  {
+    A: {
+      'google': [ // plugin organize name
+        ...tools
+      ],
+      'custom': [ // custom tools
+        ...tools
+      ],
+      'workflow': [ // workflow as tools
+        ...tools
+      ]
+    }
+  }
+  */
+  const { letters, groups: withLetterAndGroupViewToolsData } = groupItems(tools, tool => (tool as any).label[language][0])
+  const treeViewToolsData = useMemo(() => {
+    const result: Record<string, ToolWithProvider[]> = {}
+    Object.keys(withLetterAndGroupViewToolsData).forEach((letter) => {
+      Object.keys(withLetterAndGroupViewToolsData[letter]).forEach((groupName) => {
+        if (!result[groupName])
+          result[groupName] = []
+        result[groupName].push(...withLetterAndGroupViewToolsData[letter][groupName])
       })
     })
-  }, [isCustom, customTools, buildInTools, searchText, language])
+    return result
+  }, [withLetterAndGroupViewToolsData])
 
-  const renderGroup = useCallback((toolWithProvider: ToolWithProvider) => {
-    const list = toolWithProvider.tools
+  const listViewToolData = useMemo(() => {
+    const result: ToolWithProvider[] = []
+    letters.forEach((letter) => {
+      Object.keys(withLetterAndGroupViewToolsData[letter]).forEach((groupName) => {
+        result.push(...withLetterAndGroupViewToolsData[letter][groupName].map((item) => {
+          return {
+            ...item,
+            letter,
+          }
+        }))
+      })
+    })
 
-    return (
-      <div
-        key={toolWithProvider.id}
-        className='mb-1 last-of-type:mb-0'
-      >
-        <div className='flex items-start px-3 h-[22px] text-xs font-medium text-gray-500'>
-          {toolWithProvider.label[language]}
-        </div>
-        {
-          list.map(tool => (
-            <Tooltip
-              key={tool.name}
-              selector={`workflow-block-tool-${tool.name}`}
-              position='right'
-              className='!p-0 !px-3 !py-2.5 !w-[200px] !leading-[18px] !text-xs !text-gray-700 !border-[0.5px] !border-black/5 !bg-transparent !rounded-xl !shadow-lg'
-              htmlContent={(
-                <div>
-                  <div className='flex items-center mb-2'>
-                    <BlockIcon
-                      size='md'
-                      className='mr-2'
-                      type={BlockEnum.Tool}
-                      toolIcon={toolWithProvider.icon}
-                    />
-                    <div className='text-sm text-gray-900'>{tool.label[language]}</div>
-                  </div>
-                  {tool.description[language]}
-                </div>
-              )}
-              noArrow
-            >
-              <div
-                className='flex items-center px-3 w-full h-8 rounded-lg hover:bg-gray-50 cursor-pointer'
-                onClick={() => onSelect(BlockEnum.Tool, {
-                  provider_id: toolWithProvider.id,
-                  provider_type: toolWithProvider.type,
-                  provider_name: toolWithProvider.name,
-                  tool_name: tool.name,
-                  tool_label: tool.label[language],
-                  title: tool.label[language],
-                })}
-              >
-                <BlockIcon
-                  className='mr-2'
-                  type={BlockEnum.Tool}
-                  toolIcon={toolWithProvider.icon}
-                />
-                <div className='text-sm text-gray-900'>{tool.label[language]}</div>
-              </div>
-            </Tooltip>
-          ))
-        }
-      </div>
-    )
-  }, [onSelect, language])
+    return result
+  }, [withLetterAndGroupViewToolsData, letters])
+
+  const toolRefs = useRef({})
 
   return (
-    <div className='p-1 max-h-[464px] overflow-y-auto'>
+    <div className={classNames('p-1 max-w-[320px]', className)}>
       {
-        !tools.length && (
-          <div className='flex items-center px-3 h-[22px] text-xs font-medium text-gray-500'>{t('workflow.tabs.noResult')}</div>
+        !tools.length && !showWorkflowEmpty && (
+          <div className='flex items-center px-3 h-[22px] text-xs font-medium text-text-tertiary'>{t('workflow.tabs.noResult')}</div>
         )
       }
-      {
-        !!tools.length && tools.map(renderGroup)
-      }
+      {!tools.length && showWorkflowEmpty && (
+        <div className='py-10'>
+          <Empty />
+        </div>
+      )}
+      {!!tools.length && (
+        isFlatView ? (
+          <ToolListFlatView
+            toolRefs={toolRefs}
+            letters={letters}
+            payload={listViewToolData}
+            isShowLetterIndex={isShowLetterIndex}
+            hasSearchText={hasSearchText}
+            onSelect={onSelect}
+            selectedTools={selectedTools}
+          />
+        ) : (
+          <ToolListTreeView
+            payload={treeViewToolsData}
+            hasSearchText={hasSearchText}
+            onSelect={onSelect}
+            selectedTools={selectedTools}
+          />
+        )
+      )}
+
+      {isShowLetterIndex && <IndexBar letters={letters} itemRefs={toolRefs} className={indexBarClassName} />}
     </div>
   )
 }
